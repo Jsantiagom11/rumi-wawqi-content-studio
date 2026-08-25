@@ -44,3 +44,15 @@ test("date controls remain inside the responsive editor grid", async () => {
   assert.match(css, /\.date-grid input\[type=date\]\{[^}]*min-width:0/);
   assert.match(css, /\.date-grid input\[type=date\]\{[^}]*max-width:100%/);
 });
+
+test("canvas preview is replaced atomically after photo loading", async () => {
+  const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /const buffer = document\.createElement\("canvas"\)/);
+  assert.match(source, /target\.globalCompositeOperation = "copy"/);
+  assert.match(source, /setPhotoVersion\(\(version\) => version \+ 1\)/);
+  assert.doesNotMatch(
+    source,
+    /img\.onload = \(\) => \{[^}]*render\(format, canvasRef\.current\)/,
+  );
+});
