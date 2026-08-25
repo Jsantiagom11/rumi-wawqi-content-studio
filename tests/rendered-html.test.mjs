@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("renders production identity and campaign workspace", async () => {
@@ -31,4 +32,15 @@ test("renders production identity and campaign workspace", async () => {
   assert.match(html, /Generador de piezas gráficas consistentes para Rumi Wawqi\./i);
   assert.match(html, /Generar campaña/i);
   assert.match(html, /Vista previa de la pieza gráfica/i);
+});
+
+test("date controls remain inside the responsive editor grid", async () => {
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  assert.match(
+    css,
+    /\.date-grid\{[^}]*grid-template-columns:repeat\(auto-fit,minmax\(132px,1fr\)\)/,
+  );
+  assert.match(css, /\.date-grid input\[type=date\]\{[^}]*min-width:0/);
+  assert.match(css, /\.date-grid input\[type=date\]\{[^}]*max-width:100%/);
 });
