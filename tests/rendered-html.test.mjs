@@ -48,11 +48,27 @@ test("date controls remain inside the responsive editor grid", async () => {
 test("canvas preview is replaced atomically after photo loading", async () => {
   const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 
-  assert.match(source, /const buffer = document\.createElement\("canvas"\)/);
+  assert.match(source, /const buffer = atomic \? document\.createElement\("canvas"\) : canvas/);
   assert.match(source, /target\.globalCompositeOperation = "copy"/);
   assert.match(source, /setPhotoVersion\(\(version\) => version \+ 1\)/);
   assert.doesNotMatch(
     source,
     /img\.onload = \(\) => \{[^}]*render\(format, canvasRef\.current\)/,
   );
+  assert.match(source, /render\(output, canvas, false\)/);
+  assert.match(source, /img\.onerror/);
+  assert.match(source, /URL\.revokeObjectURL\(url\)/);
+});
+
+test("saved campaigns load and all editorial errors gate export", async () => {
+  const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(source, /loadCampaign\(localStorage\)/);
+  assert.match(source, /validateCampaign\(campaignState\)/);
+  assert.match(source, /if \(errors\.length\)/);
+  assert.match(source, /photoDishId !== dishId/);
+});
+
+test("photo input advertises only formats accepted by the validator", async () => {
+  const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(source, /accept="image\/jpeg,image\/png,image\/webp"/);
 });
