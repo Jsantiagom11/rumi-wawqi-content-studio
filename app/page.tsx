@@ -1,6 +1,14 @@
 "use client";
 
 import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
+import {
+  CAMPAIGN_PACK_FORMATS,
+  loadCampaign,
+  saveCampaign,
+  validateCampaign,
+  validateDecodedImage,
+  validateImageMetadata,
+} from "./studio-core.mjs";
 
 type TemplateId = "menu" | "dish" | "event" | "visit" | "hours";
 type FormatId = "square" | "post" | "story" | "reel" | "a4" | "a3";
@@ -79,11 +87,14 @@ export default function Home() {
   const [campaignId, setCampaignId] = useState<CampaignId>("weekend"); const [objective, setObjective] = useState(CAMPAIGNS.weekend.objective); const [cta, setCta] = useState(CAMPAIGNS.weekend.cta); const [startDate, setStartDate] = useState(""); const [endDate, setEndDate] = useState("");
   const [title, setTitle] = useState(DEFAULTS.dish[0]); const [subtitle, setSubtitle] = useState(DEFAULTS.dish[1]);
   const [price, setPrice] = useState(DEFAULTS.dish[2]); const [details, setDetails] = useState(DEFAULTS.dish[3]);
-  const [photoName, setPhotoName] = useState("Falta fotografía real"); const [photoLoaded, setPhotoLoaded] = useState(false); const [photoVersion, setPhotoVersion] = useState(0); const [notice, setNotice] = useState<string | null>(null); const [exporting, setExporting] = useState(false);
-  const selectedDish = DISHES.find((d) => d.id === dishId) ?? DISHES[0]; const photoRequired = template === "dish" && !photoLoaded;
+  const [photoName, setPhotoName] = useState("Falta fotografía real"); const [photoDishId, setPhotoDishId] = useState<string | null>(null); const [photoVersion, setPhotoVersion] = useState(0); const [notice, setNotice] = useState<string | null>(null); const [exporting, setExporting] = useState(false);
+  const selectedDish = DISHES.find((d) => d.id === dishId) ?? DISHES[0];
+  const campaignState = { campaignId, objective, cta, startDate, endDate, template, format, paletteId, dishId, title, subtitle, price, details, photoDishId };
+  const campaignErrors = validateCampaign(campaignState);
+  const photoRequired = template === "dish" && photoDishId !== dishId;
 
-  const render = useCallback((output: FormatId, canvas: HTMLCanvasElement) => {
-    const { width, height } = FORMATS[output]; const buffer = document.createElement("canvas"); buffer.width = width; buffer.height = height; const ctx = buffer.getContext("2d"); if (!ctx) return;
+  const render = useCallback((output: FormatId, canvas: HTMLCanvasElement, atomic = true) => {
+    const { width, height } = FORMATS[output]; const buffer = atomic ? document.createElement("canvas") : canvas; buffer.width = width; buffer.height = height; const ctx = buffer.getContext("2d"); if (!ctx) return;
     const p = PALETTES[paletteId], u = width / 1080, m = 76 * u, lower = Math.ceil(height * (output === "square" ? .49 : .56)), g = ctx.createLinearGradient(0, 0, width, height);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
@@ -96,18 +107,37 @@ export default function Home() {
     y += 18 * u; ctx.font = `400 ${30 * u}px Arial`; ctx.globalAlpha = .82; for (const line of wrap(ctx, subtitle, width - m * 2).slice(0, 2)) { ctx.fillText(line, m, y); y += 39 * u; } ctx.globalAlpha = 1; y += 30 * u;
     ctx.fillStyle = p.accent; ctx.font = `700 ${46 * u}px Arial`; ctx.fillText(price, m, y); y += 56 * u; ctx.fillStyle = p.ink; ctx.font = `400 ${22 * u}px Arial`; ctx.globalAlpha = .7; wrap(ctx, details, width - m * 2).slice(0, 2).forEach((line, i) => ctx.fillText(line, m, y + i * 30 * u));
     const fy = height - 60 * u; ctx.globalAlpha = .82; ctx.font = `500 ${18 * u}px Arial`; ctx.fillText("CARAZ · ÁNCASH", m, fy); ctx.textAlign = "right"; ctx.fillText(cta.toUpperCase(), width - m, fy); ctx.textAlign = "left"; ctx.globalAlpha = 1;
-    canvas.width = width; canvas.height = height; const target = canvas.getContext("2d"); if (!target) return; target.globalCompositeOperation = "copy"; target.drawImage(buffer, 0, 0); target.globalCompositeOperation = "source-over";
+    if (atomic) { canvas.width = width; canvas.height = height; const target = canvas.getContext("2d"); if (!target) return; target.globalCompositeOperation = "copy"; target.drawImage(buffer, 0, 0); target.globalCompositeOperation = "source-over"; }
   }, [cta, details, paletteId, price, subtitle, template, title]);
 
   useEffect(() => { if (canvasRef.current) render(format, canvasRef.current); }, [format, photoVersion, render]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const loaded = loadCampaign(localStorage);
+      if (loaded.error) { setNotice("La campaña guardada está dañada o es incompatible; no fue sobrescrita."); return; }
+      const saved = loaded.campaign;
+      if (!saved) return;
+      setCampaignId(saved.campaignId as CampaignId); setObjective(saved.objective); setCta(saved.cta); setStartDate(saved.startDate); setEndDate(saved.endDate);
+      setTemplate(saved.template as TemplateId); setFormat(saved.format as FormatId); setPaletteId(saved.paletteId as PaletteId); setDishId(saved.dishId);
+      setTitle(saved.title); setSubtitle(saved.subtitle); setPrice(saved.price); setDetails(saved.details);
+      setNotice("Campaña guardada recuperada. Vuelve a vincular la fotografía antes de exportar.");
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
   const applyTemplate = (id: TemplateId) => { setTemplate(id); const d = DEFAULTS[id]; setTitle(d[0]); setSubtitle(d[1]); setPrice(d[2]); setDetails(d[3]); setNotice(null); };
   const applyCampaign = (id: CampaignId) => { const c = CAMPAIGNS[id]; setCampaignId(id); setObjective(c.objective); setTitle(c.title); setSubtitle(c.subtitle); setPrice(c.hook); setDetails(c.detail); setCta(c.cta); setTemplate(c.template); setNotice("Estructura de campaña cargada. Ajusta fechas y contenido antes de publicar."); };
-  const applyDish = (id: string) => { const d = DISHES.find((x) => x.id === id); if (!d) return; setDishId(id); setTemplate("dish"); setTitle(d.name); setSubtitle(d.description); setPrice(`S/ ${d.price}`); setDetails(`${d.category} · ${d.source}`); setNotice("Ficha cargada desde el catálogo verificado."); };
-  const loadPhoto = (e: ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; if (!f || !f.type.startsWith("image/")) return; const reader = new FileReader(); reader.onload = () => { const img = new Image(); img.onload = () => { imageRef.current = img; setPhotoName(f.name); setPhotoLoaded(true); setPhotoVersion((version) => version + 1); setNotice("Fotografía real vinculada a esta ficha."); }; img.src = String(reader.result); }; reader.readAsDataURL(f); };
-  const download = async (output: FormatId): Promise<boolean> => { if (photoRequired) { setNotice("Carga una fotografía real del plato antes de exportar."); return false; } const canvas = document.createElement("canvas"); render(output, canvas); const slug = title.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""); try { const blob = await canvasToPng(canvas); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.download = `rumi-wawqi_${template}_${output}_${slug || "pieza"}.png`; a.href = url; document.body.appendChild(a); a.click(); a.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 2_000); return true; } catch (error) { setNotice(error instanceof Error ? error.message : "No se pudo exportar la pieza."); return false; } };
-  const exportCurrent = async () => { if (exporting) return; setExporting(true); await download(format); setExporting(false); };
-  const exportPack = async () => { if (exporting || photoRequired) { if (photoRequired) setNotice("Carga una fotografía real del plato antes de exportar."); return; } setExporting(true); setNotice("Generando campaña en secuencia…"); for (const output of ["square", "story", "reel", "a4"] as const) { if (!(await download(output))) { setExporting(false); return; } await wait(450); } setExporting(false); setNotice("Campaña generada: feed, story, portada de Reel y A4."); };
-  const save = () => { localStorage.setItem("rumi-wawqi-studio-v3", JSON.stringify({ campaignId, objective, cta, startDate, endDate, template, format, paletteId, dishId, title, subtitle, price, details })); setNotice("Campaña guardada en este dispositivo."); };
+  const applyDish = (id: string) => { const d = DISHES.find((x) => x.id === id); if (!d) return; setDishId(id); setTemplate("dish"); setTitle(d.name); setSubtitle(d.description); setPrice(`S/ ${d.price}`); setDetails(`${d.category} · ${d.source}`); setNotice(photoDishId && photoDishId !== id ? "Plato cambiado: vincula su fotografía antes de exportar." : "Ficha cargada desde el catálogo verificado."); };
+  const loadPhoto = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; e.target.value = ""; if (!file) return;
+    try { validateImageMetadata(file); } catch (error) { setNotice(error instanceof Error ? error.message : "Imagen no válida."); return; }
+    const url = URL.createObjectURL(file); const img = new Image();
+    img.onload = () => { try { validateDecodedImage(img.naturalWidth, img.naturalHeight); imageRef.current = img; setPhotoName(file.name); setPhotoDishId(dishId); setPhotoVersion((version) => version + 1); setNotice("Fotografía real vinculada a esta ficha."); } catch (error) { setNotice(error instanceof Error ? error.message : "Imagen no válida."); } finally { URL.revokeObjectURL(url); } };
+    img.onerror = () => { URL.revokeObjectURL(url); setNotice("El navegador no pudo decodificar la imagen."); }; img.src = url;
+  };
+  const download = async (output: FormatId): Promise<boolean> => { const errors = validateCampaign(campaignState); if (errors.length) { setNotice(errors[0]); return false; } const canvas = document.createElement("canvas"); render(output, canvas, false); const slug = title.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""); try { const blob = await canvasToPng(canvas); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.download = `rumi-wawqi_${template}_${output}_${slug || "pieza"}.png`; a.href = url; document.body.appendChild(a); a.click(); a.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 10_000); return true; } catch (error) { setNotice(error instanceof Error ? error.message : "No se pudo exportar la pieza."); return false; } };
+  const exportCurrent = async () => { if (exporting) return; setExporting(true); try { await download(format); } finally { setExporting(false); } };
+  const exportPack = async () => { if (exporting) return; const errors = validateCampaign(campaignState); if (errors.length) { setNotice(errors[0]); return; } setExporting(true); setNotice("Generando campaña en secuencia…"); try { for (const output of CAMPAIGN_PACK_FORMATS as readonly FormatId[]) { if (!(await download(output))) return; await wait(650); } setNotice("Archivos solicitados: feed 1:1, post 4:5, story, portada de Reel y A4. Verifica las descargas del navegador."); } finally { setExporting(false); } };
+  const save = () => { try { saveCampaign(localStorage, campaignState); setNotice("Campaña guardada en este dispositivo."); } catch (error) { setNotice(error instanceof Error ? error.message : "No se pudo guardar la campaña."); } };
 
   return <main className="app-shell">
     <header className="topbar"><div className="brand-lockup"><span className="brand-mark">RW</span><div><strong>Rumi Wawqi</strong><small>Estudio de campañas</small></div></div><div className="top-actions"><span className="status-dot">{exporting ? "Generando archivos…" : "Campaña activa"}</span><button className="button secondary" onClick={save} disabled={exporting}>Guardar</button><button className="button secondary" onClick={exportPack} disabled={exporting}>{exporting ? "Generando…" : "Generar campaña"}</button><button className="button primary" onClick={exportCurrent} disabled={exporting}>Exportar {FORMATS[format].label}</button></div></header>
@@ -124,14 +154,14 @@ export default function Home() {
         <label className="field"><span>Precio / dato clave</span><input maxLength={32} value={price} disabled={template === "dish"} onChange={(e) => setPrice(e.target.value)} />{template === "dish" && <small className="locked">🔒 Controlado por el catálogo</small>}</label>
         <label className="field"><span>Detalle</span><input maxLength={100} value={details} onChange={(e) => setDetails(e.target.value)} /></label>
         <label className="field"><span>Llamada a la acción</span><input maxLength={38} value={cta} onChange={(e) => setCta(e.target.value)} /></label>
-        <div className="field"><span>Fotografía real {template === "dish" ? "· obligatoria" : ""}</span><label className={`upload ${photoRequired ? "required" : ""}`}><input type="file" accept="image/*" onChange={loadPhoto} /><b>＋</b><div><strong>Cargar fotografía</strong><small>{photoName}</small></div></label></div>
+        <div className="field"><span>Fotografía real {template === "dish" ? "· obligatoria" : ""}</span><label className={`upload ${photoRequired ? "required" : ""}`}><input type="file" accept="image/jpeg,image/png,image/webp" onChange={loadPhoto} /><b>＋</b><div><strong>Cargar fotografía</strong><small>{photoName}</small></div></label></div>
         <div className="field"><span>Paleta</span><div className="palette-list">{Object.entries(PALETTES).map(([id, p]) => <button aria-label={`Usar paleta ${p.label}`} key={id} className={`palette ${paletteId === id ? "active" : ""}`} onClick={() => setPaletteId(id as PaletteId)}><i style={{ background: p.base }} /><i style={{ background: p.accent }} /><small>{p.label}</small></button>)}</div></div>
       </aside>
       <section className="stage"><div className="stage-head"><div><p>VISTA PREVIA</p><strong>{FORMATS[format].label}</strong></div><span>{FORMATS[format].width} × {FORMATS[format].height} px</span></div><div className="canvas-frame"><canvas ref={canvasRef} aria-label="Vista previa de la pieza gráfica" /></div><p className="hint">Una ficha alimenta todas las salidas. La exportación conserva la resolución completa.</p></section>
       <aside className="panel inspector-panel"><div className="panel-heading"><p>PLAN DE CAMPAÑA</p><h2>Preparación de salida</h2></div>
-        <div className={`quality-card ${photoRequired ? "warning" : ""}`}><div className="quality-score">{photoRequired ? "!" : "✓"}</div><div><strong>{photoRequired ? "Falta la fotografía" : "Pieza lista"}</strong><small>{photoRequired ? "Los platos solo usan imágenes reales." : "Cumple las reglas activas."}</small></div></div>
+        <div className={`quality-card ${campaignErrors.length ? "warning" : ""}`}><div className="quality-score">{campaignErrors.length ? "!" : "✓"}</div><div><strong>{campaignErrors.length ? "Pieza incompleta" : "Pieza lista"}</strong><small>{campaignErrors[0] ?? "Cumple las reglas activas."}</small></div></div>
         <div className="dish-card campaign-card"><span>CAMPAÑA ACTIVA</span><strong>{CAMPAIGNS[campaignId].label}</strong><dl><div><dt>Objetivo</dt><dd>{objective}</dd></div><div><dt>Vigencia</dt><dd>{startDate || endDate ? `${startDate || "—"} → ${endDate || "—"}` : "Por definir"}</dd></div><div><dt>CTA</dt><dd>{cta}</dd></div></dl></div>
-        <div className="checks">{[["Objetivo", objective ? "Definido" : "Pendiente"], ["Temporalidad", startDate && endDate ? "Definida" : "Pendiente"], ["Llamada a la acción", cta ? "Definida" : "Pendiente"], ["Fotografía", photoRequired ? "Pendiente" : "Correcta"]].map((x) => <div key={x[0]}><span>{x[1] === "Pendiente" ? "○" : "✓"}</span><p><strong>{x[0]}</strong><small>{x[1]}</small></p></div>)}</div>
+        <div className="checks">{[["Objetivo", objective.trim() ? "Definido" : "Pendiente"], ["Temporalidad", startDate && endDate && startDate <= endDate ? "Definida" : "Pendiente"], ["Llamada a la acción", cta.trim() ? "Definida" : "Pendiente"], ["Fotografía", photoRequired ? "Pendiente" : "Correcta"]].map((x) => <div key={x[0]}><span>{x[1] === "Pendiente" ? "○" : "✓"}</span><p><strong>{x[0]}</strong><small>{x[1]}</small></p></div>)}</div>
         <div className="rule-card"><span>SISTEMA DE CAMPAÑA</span><p>Un mismo esfuerzo genera feed, story y pieza imprimible. El catálogo solo interviene cuando la campaña incluye un plato o precio.</p></div>
         <div className="format-card"><span>APOYO OPERATIVO</span><p className="catalog-count"><b>7</b> fichas verificadas</p><small>Plato vinculado actualmente: {selectedDish.name}. No limita las campañas institucionales, estacionales o de eventos.</small></div>
         {notice && <p className="notice" role="status">{notice}</p>}
