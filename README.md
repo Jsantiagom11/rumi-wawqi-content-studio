@@ -19,6 +19,12 @@ Convierte una ficha de campaña en salidas listas para redes sociales e impresi�
 
 La campaña completa se codifica y descarga de forma secuencial. Cada PNG termina antes de iniciar el siguiente, evitando artefactos transparentes y desajustes por presión de memoria. El recorte fotográfico usa límites explícitos y coordenadas enteras para conservar bordes consistentes en resoluciones altas.
 
+## Privacidad y datos públicos
+
+Este repositorio contiene únicamente información comercial destinada a publicación, como identidad de marca, ubicación general, carta y precios. No deben versionarse teléfonos personales, correos privados, credenciales, rutas locales, datos de clientes, inventario interno ni métricas operativas no destinadas al público.
+
+Las fotografías aportadas por el usuario se procesan localmente en el navegador y no se almacenan en un backend del proyecto.
+
 ## Stack
 
 - TypeScript 5
